@@ -6,7 +6,7 @@ const app = express();
 const port = 4000;
 
 const jwt = require('jsonwebtoken');
-const SECRET_KEY = 'WTF'; // Replace with a strong secret key
+const SECRET_KEY = '7N84V'; // Replace with a strong secret key
 
 
 // Parse JSON request body
@@ -38,6 +38,30 @@ app.get('/api/books', (req, res) => {
         res.json({ books: rows });
     });
 });
+
+app.post('/api/books', (req, res) => {
+    const { bookname } = req.body;
+
+    // Validate input
+    if (!bookname) {
+        return res.status(400).json({ error: "Book name is required." });
+    }
+
+    // SQL query to insert a new book with NULL userid (not borrowed)
+    const query = `INSERT INTO books (bookname, userid) VALUES (?, NULL)`;
+    const params = [bookname];
+
+    db.run(query, params, function (err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        res.status(201).json({
+            message: "Book added successfully!",
+            bookId: this.lastID, // Returns the ID of the newly added book
+        });
+    });
+});
+
 
 
 app.post('/api/register', (req, res) => {
@@ -123,6 +147,56 @@ const authenticateToken = (req, res, next) => {
 };
 
 
+app.get('/api/user', authenticateToken, (req, res) => {
+    const { userId } = req.user; // Extract userId from the token
+
+    const query = `SELECT full_name FROM User WHERE userid = ?`;
+    const params = [userId];
+
+    db.get(query, params, (err, row) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        if (!row) {
+            return res.status(404).json({ error: "User not found." });
+        }
+
+        res.status(200).json({ fullName: row.full_name });
+    });
+});
+
+
+// PROFILE ACCOUNT INFO
+app.get('/api/useraccountinfo', authenticateToken, (req, res) => {
+    const { userId } = req.user; // Extract userId from the token
+
+    const query = `SELECT full_name, email, password FROM User WHERE userid = ?`;
+    const params = [userId];
+
+    db.get(query, params, (err, row) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        if (!row) {
+            return res.status(404).json({ error: "User not found." });
+        }
+
+        res.status(200).json(row);
+    });
+});
+
+
+
+
+app.post('/api/logout', (req, res) => {
+    // Logout simply clears the client token.
+    // Optionally, add the token to a server-side blacklist if you want to invalidate it completely.
+    res.json({ message: "Logout successful!" });
+});
+
+
 app.post('/api/borrow', authenticateToken, (req, res) => {
     const { userId } = req.user; // Extracted from token
     const { bookId } = req.body;
@@ -143,6 +217,45 @@ app.post('/api/borrow', authenticateToken, (req, res) => {
     });
 });
 
+
+
+app.get('/api/borrowed-books', authenticateToken, (req, res) => {
+    const { userId } = req.user; // Extract userId from the token
+
+    const query = `SELECT * FROM books WHERE userid = ?`;
+    const params = [userId];
+
+    db.all(query, params, (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "No borrowed books found." });
+        }
+
+        res.status(200).json({ borrowedBooks: rows });
+    });
+});
+
+
+app.post('/api/return', authenticateToken, (req, res) => {
+    const { userId } = req.user; // Extracted from token
+    const { bookId } = req.body;
+
+    const query = `UPDATE books SET userid = NULL WHERE bookid = ? AND userid = ?`;
+    const params = [bookId, userId];
+
+    db.run(query, params, function (err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (this.changes === 0) {
+            return res.status(400).json({ error: "Book not found or not borrowed by this user." });
+        }
+        res.status(200).json({ message: "Book returned successfully!" });
+    });
+});
 
 
 
