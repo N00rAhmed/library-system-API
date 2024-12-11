@@ -7,6 +7,7 @@ const port = 4000;
 
 const jwt = require('jsonwebtoken');
 const SECRET_KEY = '7N84V'; // Replace with a strong secret key
+const bcrypt = require('bcrypt');
 
 
 // Parse JSON request body
@@ -64,6 +65,30 @@ app.post('/api/books', (req, res) => {
 
 
 
+app.delete('/api/books/:bookid', (req, res) => {
+    const { bookid } = req.params;
+
+    // Validate input
+    if (!bookid) {
+        return res.status(400).json({ error: "Book ID is required." });
+    }
+
+    // SQL query to delete the book by its ID
+    const query = `DELETE FROM books WHERE bookid = ?`;
+    db.run(query, [bookid], function (err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (this.changes === 0) {
+            return res.status(404).json({ error: "Book not found." });
+        }
+        res.status(200).json({ message: "Book deleted successfully!" });
+    });
+});
+
+
+
+
 app.post('/api/register', (req, res) => {
     const { full_name, email, password } = req.body;
 
@@ -94,6 +119,84 @@ app.get('/api/register', (req, res) => {
 });
 
 
+app.post('/api/registerbranchlib', (req, res) => {
+    const { full_name, email, password } = req.body;
+
+    // Validate required fields
+    if (!full_name || !email || !password) {
+        return res.status(400).json({ error: "Full name, email, and password are required." });
+    }
+
+    const query = `INSERT INTO BranchLibrarian (full_name, email, password) VALUES (?, ?, ?)`;
+    const params = [full_name, email, password];
+
+    db.run(query, params, function (err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        res.status(201).json({ message: "User registered successfully!", userId: this.lastID });
+    });
+});
+
+app.get('/api/registerbranchlib', (req, res) => {
+    db.all(`SELECT * FROM BranchLibrarian`, [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+        }
+        res.json({ users: rows });
+    });
+});
+
+
+// Admin login endpoint
+app.post('/api/adminlogin', (req, res) => {
+    const { email, password } = req.body; // Just extract email and password from the request body
+
+    // If either email or password is not provided, return a 400 error
+    if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    // Update the query to use email and password only
+    const query = `SELECT * FROM Admin WHERE email = ? AND password = ?`;
+    const params = [email, password];
+
+    db.get(query, params, (err, row) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (!row) {
+            return res.status(401).json({ error: "Invalid email or password." });
+        }
+
+        // Generate a JWT token and include the userId and email in the token
+        const token = jwt.sign({ userId: row.userid, email: row.email }, SECRET_KEY, {
+            expiresIn: '1h', // Token expires in 1 hour
+        });
+
+        // Respond with the token and user details
+        res.json({ 
+            message: "Login successful!", 
+            token, 
+            user: { id: row.userid, email: row.email, fullName: row.full_name } 
+        });
+    });
+});
+
+// const authenticateTokenAdmin = (req, res, next) => {
+//     const authHeader = req.headers['authorization'];
+//     const token = authHeader && authHeader.split(' ')[1]; // Extract token from "Bearer <token>"
+
+//     if (!token) return res.status(401).json({ error: "Access denied. No token provided." });
+
+//     jwt.verify(token, SECRET_KEY, (err, user) => {
+//         if (err) return res.status(403).json({ error: "Invalid token." });
+
+//         req.user = user; // Attach user info to the request
+//         next();
+//     });
+// };
 
 app.post('/api/login', (req, res) => {
     const { email, password } = req.body; // Just extract email and password from the request body
