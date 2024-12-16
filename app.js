@@ -133,7 +133,9 @@ app.delete('/api/books/:bookid', (req, res) => {
 
 
 
-app.post('/api/register', (req, res) => {
+const saltRounds = 10; // Define the salt rounds for hashing
+
+app.post('/api/register', async (req, res) => {
     const { full_name, email, password } = req.body;
 
     // Validate required fields
@@ -141,16 +143,26 @@ app.post('/api/register', (req, res) => {
         return res.status(400).json({ error: "Full name, email, and password are required." });
     }
 
-    const query = `INSERT INTO User (full_name, email, password) VALUES (?, ?, ?)`;
-    const params = [full_name, email, password];
+    try {
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    db.run(query, params, function (err) {
-        if (err) {
-            return res.status(500).json({ error: err.message });
-        }
-        res.status(201).json({ message: "User registered successfully!", userId: this.lastID });
-    });
+        // Insert the user into the database
+        const query = `INSERT INTO User (full_name, email, password) VALUES (?, ?, ?)`;
+        const params = [full_name, email, hashedPassword];
+
+        db.run(query, params, function (err) {
+            if (err) {
+                return res.status(500).json({ error: err.message });
+            }
+            res.status(201).json({ message: "User registered successfully!", userId: this.lastID });
+        });
+    } catch (err) {
+        console.error("Error hashing password:", err.message);
+        res.status(500).json({ error: "Failed to register user. Please try again later." });
+    }
 });
+
 
 app.get('/api/register', (req, res) => {
     db.all(`SELECT * FROM User`, [], (err, rows) => {
@@ -352,22 +364,30 @@ app.post('/api/branchlibrarian', (req, res) => {
 // };
 
 app.post('/api/login', (req, res) => {
-    const { email, password } = req.body; // Just extract email and password from the request body
+    const { email, password } = req.body; // Extract email and password from the request body
 
-    // If either email or password is not provided, return a 400 error
+    // Validate required fields
     if (!email || !password) {
         return res.status(400).json({ error: "Email and password are required." });
     }
 
-    // Update the query to use email and password only
-    const query = `SELECT * FROM User WHERE email = ? AND password = ?`;
-    const params = [email, password];
+    // Update query to select the hashed password
+    const query = `SELECT * FROM User WHERE email = ?`;
+    const params = [email];
 
-    db.get(query, params, (err, row) => {
+    db.get(query, params, async (err, row) => {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
+
         if (!row) {
+            return res.status(401).json({ error: "Invalid email or password." });
+        }
+
+        // Compare the hashed password with the provided password
+        const passwordMatch = await bcrypt.compare(password, row.password);
+
+        if (!passwordMatch) {
             return res.status(401).json({ error: "Invalid email or password." });
         }
 
@@ -377,10 +397,10 @@ app.post('/api/login', (req, res) => {
         });
 
         // Respond with the token and user details
-        res.json({ 
-            message: "Login successful!", 
-            token, 
-            user: { id: row.userid, email: row.email, fullName: row.full_name } 
+        res.json({
+            message: "Login successful!",
+            token,
+            user: { id: row.userid, email: row.email, fullName: row.full_name }
         });
     });
 });
