@@ -40,17 +40,56 @@ app.get('/api/books', (req, res) => {
     });
 });
 
+
+// Define a route to query books data
+app.get('/api/media', (req, res) => {
+    db.all(`SELECT * FROM media`, [], (err, rows) => {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+        }
+        res.json({ media: rows });
+    });
+});
+
+// Define a route to delete a book by ID
+app.delete('/api/media/:id', (req, res) => {
+    const { id } = req.params;
+
+    // Use parameterized query to prevent SQL injection
+    db.run(`DELETE FROM media WHERE id = ?`, [id], function (err) {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+        }
+
+        if (this.changes === 0) {
+            res.status(404).json({ error: "Book not found" });
+            return;
+        }
+
+        res.json({ message: "Book deleted successfully!" });
+    });
+});
+
+
 app.post('/api/books', (req, res) => {
-    const { bookname } = req.body;
+    const { name, genre, publishedate } = req.body;
 
     // Validate input
-    if (!bookname) {
+    if (!name) {
         return res.status(400).json({ error: "Book name is required." });
+    }
+    if (!genre) {
+        return res.status(400).json({ error: "Genre is required." });
+    }
+    if (!publishedate) {
+        return res.status(400).json({ error: "Publish date is required." });
     }
 
     // SQL query to insert a new book with NULL userid (not borrowed)
-    const query = `INSERT INTO books (bookname, userid) VALUES (?, NULL)`;
-    const params = [bookname];
+    const query = `INSERT INTO books (name, genre, publishedate, userid) VALUES (?, ?, ?, NULL)`;
+    const params = [name, genre, publishedate];
 
     db.run(query, params, function (err) {
         if (err) {
@@ -62,6 +101,11 @@ app.post('/api/books', (req, res) => {
         });
     });
 });
+
+
+
+
+
 
 
 
@@ -117,6 +161,43 @@ app.get('/api/register', (req, res) => {
         res.json({ users: rows });
     });
 });
+app.delete('/api/register/:id', (req, res) => {
+    const userId = req.params.id;
+
+    db.run(`DELETE FROM User WHERE userid = ?`, [userId], function (err) {
+        if (err) {
+            res.status(500).json({ error: err.message });
+            return;
+        }
+
+        res.json({ message: "User deleted successfully" });
+    });
+});
+
+// Update user endpoint
+app.put("/api/register/:userid", (req, res) => {
+    const { userid } = req.params;
+    const { full_name, email, password } = req.body;
+  
+    // Validate input
+    if (!full_name || !email || !password) {
+      return res.status(400).json({ error: "All fields are required" });
+    }
+  
+    const sql = `UPDATE User SET full_name = ?, email = ?, password = ? WHERE userid = ?`;
+    const params = [full_name, email, password, userid];
+  
+    db.run(sql, params, function (err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      if (this.changes === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json({ success: true, message: "User updated successfully" });
+    });
+  });
+  
 
 
 app.post('/api/registerbranchlib', (req, res) => {
@@ -138,6 +219,7 @@ app.post('/api/registerbranchlib', (req, res) => {
     });
 });
 
+
 app.get('/api/registerbranchlib', (req, res) => {
     db.all(`SELECT * FROM BranchLibrarian`, [], (err, rows) => {
         if (err) {
@@ -148,6 +230,34 @@ app.get('/api/registerbranchlib', (req, res) => {
     });
 });
 
+app.post('/api/addmedia', (req, res) => {
+    const { name, genre, publishedate, mediatype } = req.body;
+
+    // Validate required fields
+    if (!name || !genre || !publishedate || !mediatype) {
+        return res.status(400).json({ error: "User ID, name, genre, publish date, and media type are required." });
+    }
+
+    // SQL query to insert media into the media table
+    const query = `
+        INSERT INTO media (name, genre, publishedate, mediatype)
+        VALUES (?, ?, ?, ?)
+    `;
+    const params = [name, genre, publishedate, mediatype];
+
+    // Execute the query to insert data
+    db.run(query, params, function (err) {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        // Respond with a success message and the ID of the newly added media
+        res.status(201).json({
+            message: "Media added successfully!",
+            mediaId: this.lastID, // lastID will return the auto-incremented ID of the newly inserted row
+        });
+    });
+});
 
 // Admin login endpoint
 app.post('/api/adminlogin', (req, res) => {
@@ -182,6 +292,49 @@ app.post('/api/adminlogin', (req, res) => {
             user: { id: row.userid, email: row.email, fullName: row.full_name } 
         });
     });
+});
+
+
+
+// Admin login endpoint
+app.post('/api/branchlibrarian', (req, res) => {
+    const { email, password } = req.body; // Just extract email and password from the request body
+
+    // If either email or password is not provided, return a 400 error
+    if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required." });
+    }
+
+    // Update the query to use email and password only
+    const query = `SELECT * FROM BranchLibrarian WHERE email = ? AND password = ?`;
+    const params = [email, password];
+
+    db.get(query, params, (err, row) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+        if (!row) {
+            return res.status(401).json({ error: "Invalid email or password." });
+        }
+
+        // Generate a JWT token and include the userId and email in the token
+        const token = jwt.sign({ BranchLibrarianID: row.userid, email: row.email }, SECRET_KEY, {
+            expiresIn: '1h', // Token expires in 1 hour
+        });
+
+        // Respond with the token and user details
+        res.json({ 
+            message: "Login successful!", 
+            token, 
+            user: { id: row.BranchLibrarianID, email: row.email, fullName: row.full_name } 
+        });
+    });
+});
+
+app.post('/api/branchlibrarian', (req, res) => {
+    // Logout simply clears the client token.
+    // Optionally, add the token to a server-side blacklist if you want to invalidate it completely.
+    res.json({ message: "Logout successful!" });
 });
 
 // const authenticateTokenAdmin = (req, res, next) => {
@@ -300,32 +453,82 @@ app.post('/api/logout', (req, res) => {
 });
 
 
+// app.post('/api/borrow', authenticateToken, (req, res) => {
+//     const { userId } = req.user; // Extracted from token
+//     const { id } = req.body;
+//     console.log("User ID:", userId); // Log userId
+//     console.log("ID:", id); // Log bookId
+
+//     const query = `UPDATE media SET userid = ? WHERE id = ? AND userid IS NULL`;
+//     const params = [userId, id];
+
+//     db.run(query, params, function (err) {
+//         if (err) {
+//             return res.status(500).json({ error: err.message });
+//         }
+//         if (this.changes === 0) {
+//             return res.status(400).json({ error: "Book is already borrowed or doesn't exist." });
+//         }
+//         res.status(200).json({ message: "Book borrowed successfully!" });
+//     });
+// });
 app.post('/api/borrow', authenticateToken, (req, res) => {
-    const { userId } = req.user; // Extracted from token
-    const { bookId } = req.body;
-    console.log("User ID:", userId); // Log userId
-    console.log("Book ID:", bookId); // Log bookId
+    const { userId } = req.user; // Extracted from the token
+    const { id } = req.body; // Media ID to be borrowed
 
-    const query = `UPDATE books SET userid = ? WHERE bookid = ? AND userid IS NULL`;
-    const params = [userId, bookId];
+    // Get the current date and format it as "day-month-year"
+    const currentDate = new Intl.DateTimeFormat('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).format(new Date());
 
-    db.run(query, params, function (err) {
+    // Check if media can be borrowed and assign userId to it
+    const updateMediaQuery = `UPDATE media SET userid = ? WHERE id = ? AND userid IS NULL`;
+    const params = [userId, id];
+
+    db.run(updateMediaQuery, params, function (err) {
         if (err) {
             return res.status(500).json({ error: err.message });
         }
         if (this.changes === 0) {
-            return res.status(400).json({ error: "Book is already borrowed or doesn't exist." });
+            return res.status(400).json({ error: "Media is already borrowed or doesn't exist." });
         }
-        res.status(200).json({ message: "Book borrowed successfully!" });
+
+        // Fetch media details to insert into borrowing history
+        const fetchMediaQuery = `SELECT name, genre, publishedate FROM media WHERE id = ?`;
+        db.get(fetchMediaQuery, [id], (err, media) => {
+            if (err) {
+                return res.status(500).json({ error: "Failed to fetch media details." });
+            }
+            if (!media) {
+                return res.status(400).json({ error: "Media details not found." });
+            }
+
+            // Insert record into borrowing history with the current date
+            const insertHistoryQuery = `
+                INSERT INTO borrowinghistory (userid, bookname, genre, publishedate, dateborrowed)
+                VALUES (?, ?, ?, ?, ?)
+            `;
+            const historyParams = [userId, media.name, media.genre, media.publishedate, currentDate];
+
+            db.run(insertHistoryQuery, historyParams, function (err) {
+                if (err) {
+                    return res.status(500).json({ error: "Failed to update borrowing history." });
+                }
+                res.status(200).json({ message: "Media borrowed successfully and history updated!" });
+            });
+        });
     });
 });
+
 
 
 
 app.get('/api/borrowed-books', authenticateToken, (req, res) => {
     const { userId } = req.user; // Extract userId from the token
 
-    const query = `SELECT * FROM books WHERE userid = ?`;
+    const query = `SELECT * FROM media WHERE userid = ?`;
     const params = [userId];
 
     db.all(query, params, (err, rows) => {
@@ -344,10 +547,10 @@ app.get('/api/borrowed-books', authenticateToken, (req, res) => {
 
 app.post('/api/return', authenticateToken, (req, res) => {
     const { userId } = req.user; // Extracted from token
-    const { bookId } = req.body;
+    const { id } = req.body;
 
-    const query = `UPDATE books SET userid = NULL WHERE bookid = ? AND userid = ?`;
-    const params = [bookId, userId];
+    const query = `UPDATE media SET userid = NULL WHERE id = ? AND userid = ?`;
+    const params = [id, userId];
 
     db.run(query, params, function (err) {
         if (err) {
@@ -357,6 +560,28 @@ app.post('/api/return', authenticateToken, (req, res) => {
             return res.status(400).json({ error: "Book not found or not borrowed by this user." });
         }
         res.status(200).json({ message: "Book returned successfully!" });
+    });
+});
+
+
+
+
+app.get('/api/borrow/history', authenticateToken, (req, res) => {
+    const { userId } = req.user; // Extract userId from the token
+
+    const query = `
+        SELECT borrowinghistoryid, bookname, genre, publishedate, dateborrowed
+        FROM borrowinghistory
+        WHERE userid = ?
+        ORDER BY dateborrowed DESC
+    `;
+    const params = [userId];
+
+    db.all(query, params, (err, rows) => {
+        if (err) {
+            return res.status(500).json({ error: "Failed to fetch borrowing history." });
+        }
+        res.status(200).json({ history: rows });
     });
 });
 
